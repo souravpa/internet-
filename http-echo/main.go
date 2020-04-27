@@ -171,10 +171,9 @@ func main() {
 		os.Exit(127)
 	}
 
-	var connDone = make(chan net.Conn, 1)
+	var connDone = make(chan net.Conn, 100)
 	var fileName = make(chan ReadDone, 1)
 	var content = make(chan SendJob, 1)
-	var WconnDone = make(chan net.Conn, 100)
 	var WfileName = make(chan ReadDone, 100)
 	var Wcontent = make(chan SendJob, 100)
 
@@ -203,14 +202,14 @@ func main() {
 				if (rand.Intn(2) == 1){
 					readreq(conn, fileName)
 				} else{
-					go readreq(conn, fileName)
+					go readreq(conn, WfileName)
 				}
 			case buffer := <- fileName:
 				fmt.Println("got read Done")
 				if (rand.Intn(2) == 1){
 					findFile(buffer, content)
 				} else {
-					go findFile(buffer, content)
+					go findFile(buffer, Wcontent)
 				}
 			case sendContent := <- content:
 				if (rand.Intn(2) == 1){
@@ -218,18 +217,12 @@ func main() {
 				}else {
 					go send(sendContent)
 				}
-			case conn := <- WconnDone:
-				if (rand.Intn(2) == 1){
-					readreq(conn, fileName)
-				} else{
-					go readreq(conn, fileName)
-				}
 			case buffer := <- WfileName:
 				fmt.Println("got read Done")
 				if (rand.Intn(2) == 1){
 					findFile(buffer, content)
 				} else {
-					go findFile(buffer, content)
+					go findFile(buffer,Wcontent)
 				}
 			case sendContent := <- Wcontent:
 				if (rand.Intn(2) == 1){
