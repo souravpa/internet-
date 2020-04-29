@@ -1,30 +1,25 @@
 package main
 
 import (
-	"io"
-	// "context"
+	"encoding/binary"
 	"flag"
 	"fmt"
-	"net/http"
+	"io/ioutil"
 	"net"
 	"os"
-	"io/ioutil"
-	// "os/signal"
-	"time"
-	"encoding/binary"
 	"strings"
-	"math/rand"
+
+	"github.com/tobert/pcstat"
 )
 
 var (
-	listenFlag  = flag.String("listen", ":5678", "address and port to listen")
-	textFlag    = flag.String("text", "", "text to put on the webpage")
+	listenFlag = flag.String("listen", ":5678", "address and port to listen")
+	textFlag   = flag.String("text", "", "text to put on the webpage")
 
 	// stdoutW and stderrW are for overriding in test.
 	stdoutW = os.Stdout
 	stderrW = os.Stderr
 )
-
 
 const (
 	httpHeaderAppName    string = "X-App-Name"
@@ -35,12 +30,12 @@ const (
 )
 
 type SendJob struct {
-	conn net.Conn
-	content string 
+	conn    net.Conn
+	content string
 }
 
-type ReadDone struct{
-	conn net.Conn
+type ReadDone struct {
+	conn     net.Conn
 	fileName string
 }
 
@@ -54,67 +49,67 @@ type ReadDone struct{
 
 // metaResponseWriter is a response writer that saves information about the
 // response for logging.
-type metaResponseWriter struct {
-	writer http.ResponseWriter
-	status int
-	length int
-}
+// type metaResponseWriter struct {
+// 	writer http.ResponseWriter
+// 	status int
+// 	length int
+// }
 
-// Header implements the http.ResponseWriter interface.
-func (w *metaResponseWriter) Header() http.Header {
-	return w.writer.Header()
-}
+// // Header implements the http.ResponseWriter interface.
+// func (w *metaResponseWriter) Header() http.Header {
+// 	return w.writer.Header()
+// }
 
-// WriteHeader implements the http.ResponseWriter interface.
-func (w *metaResponseWriter) WriteHeader(s int) {
-	w.status = s
-	w.writer.WriteHeader(s)
-}
+// // WriteHeader implements the http.ResponseWriter interface.
+// func (w *metaResponseWriter) WriteHeader(s int) {
+// 	w.status = s
+// 	w.writer.WriteHeader(s)
+// }
 
-// Write implements the http.ResponseWriter interface.
-func (w *metaResponseWriter) Write(b []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	w.length = len(b)
-	return w.writer.Write(b)
-}
+// // Write implements the http.ResponseWriter interface.
+// func (w *metaResponseWriter) Write(b []byte) (int, error) {
+// 	if w.status == 0 {
+// 		w.status = http.StatusOK
+// 	}
+// 	w.length = len(b)
+// 	return w.writer.Write(b)
+// }
 
-// httpLog accepts an io object and logs the request and response objects to the
-// given io.Writer.
-func httpLog(out io.Writer, h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var mrw metaResponseWriter
-		mrw.writer = w
+// // httpLog accepts an io object and logs the request and response objects to the
+// // given io.Writer.
+// func httpLog(out io.Writer, h http.HandlerFunc) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		var mrw metaResponseWriter
+// 		mrw.writer = w
 
-		defer func(start time.Time) {
-			status := mrw.status
-			length := mrw.length
-			end := time.Now()
-			dur := end.Sub(start)
-			fmt.Fprintf(out, httpLogFormat,
-				end.Format(httpLogDateFormat),
-				r.Host, r.RemoteAddr, r.Method, r.URL.Path, r.Proto,
-				status, length, r.UserAgent(), dur)
-		}(time.Now())
+// 		defer func(start time.Time) {
+// 			status := mrw.status
+// 			length := mrw.length
+// 			end := time.Now()
+// 			dur := end.Sub(start)
+// 			fmt.Fprintf(out, httpLogFormat,
+// 				end.Format(httpLogDateFormat),
+// 				r.Host, r.RemoteAddr, r.Method, r.URL.Path, r.Proto,
+// 				status, length, r.UserAgent(), dur)
+// 		}(time.Now())
 
-		h(&mrw, r)
-	}
-}
+// 		h(&mrw, r)
+// 	}
+// }
 
-
-func acceptConn(listen net.Listener, connDone chan<- net.Conn){
+func acceptConn(listen net.Listener, connDone chan<- net.Conn) {
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection:", err.Error())
 			os.Exit(1)
 		}
-		connDone <- conn 
+		connDone <- conn
 	}
 }
 
-func readreq(conn net.Conn, strRet chan<- ReadDone){
+// Read requests from the client
+func readreq(conn net.Conn, strRet chan<- ReadDone) {
 	var buf = make([]byte, 1024)
 	for {
 		len, err := conn.Read(buf)
@@ -125,19 +120,19 @@ func readreq(conn net.Conn, strRet chan<- ReadDone){
 		}
 
 		s := string(buf[:len])
-		fmt.Println("Stuff", s)
-		fmt.Println("len", binary.Size(buf))
+		fmt.Println("Request:", s)
+		fmt.Println("Length =", binary.Size(buf))
 		break
 	}
-	fmt.Println("exiting str ret")
-	strRet <-  ReadDone{conn, string(buf)}
-	fmt.Println("exiting read Done")
+	fmt.Println("exited str ret")
+	strRet <- ReadDone{conn, string(buf)}
+	fmt.Println("exited read Done")
 }
 
-func findFile(job ReadDone, content chan<- SendJob){
+func findFile(job ReadDone, content chan<- SendJob) {
 	fmt.Println("entered find file")
 	cont, err := ioutil.ReadFile(strings.Fields(job.fileName)[1][1:])
-	if (err != nil){
+	if err != nil {
 		fmt.Println(err)
 		return
 	}
@@ -145,26 +140,50 @@ func findFile(job ReadDone, content chan<- SendJob){
 	fmt.Println("exited find file")
 }
 
-func send(job SendJob){
+func send(job SendJob) {
 	fmt.Println("entered Send Job")
+	// should write response header using writev() and will finish soon
 	bufwrite := []byte(job.content)
-		job.conn.Write(bufwrite)
-		/*
-
-			send file 
-			close
-
-		*/
-	//job.conn.Write(t)
+	job.conn.Write(bufwrite)
 	job.conn.Close()
 	fmt.Println("sent job")
 }
 
+// Check if a file with the given filename is all in memory
+// Return true by default when error occurs
+func inMemory(job ReadDone) (bool, error) {
+	name := strings.Fields(job.fileName)[1][1:]
+	if len(name) == 0 {
+		return true, nil
+	}
+	f, openErr := os.Open(name)
+	stat, statErr := f.Stat()
+	if statErr != nil {
+		fmt.Println(statErr)
+		return true, statErr
+	}
+	size := stat.Size()
+	if openErr != nil {
+		fmt.Println(openErr)
+		return true, openErr
+	}
+	res, err := pcstat.FileMincore(f, size)
+	if err != nil {
+		fmt.Println(err)
+		return true, err
+	}
+	// data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
+	// Only when all pages are in memory will we use the main process to handle it
+	for _, inMem := range res {
+		if !inMem {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func main() {
 	flag.Parse()
-
-	// Validation
-
 	args := flag.Args()
 	if len(args) > 0 {
 		fmt.Fprintln(stderrW, "Too many arguments!")
@@ -174,16 +193,9 @@ func main() {
 	var connDone = make(chan net.Conn, 100)
 	var fileName = make(chan ReadDone, 1)
 	var content = make(chan SendJob, 1)
-	var WfileName = make(chan ReadDone, 100)
 	var Wcontent = make(chan SendJob, 100)
 
-	/*
-		
-		accepting connections
-
-	*/
-
-	l, err := net.Listen("tcp", "localhost:8080")
+	l, err := net.Listen("tcp", ":8080")
 
 	if err != nil {
 		fmt.Println("Error listening:", err.Error())
@@ -193,49 +205,33 @@ func main() {
 	// Close the listener when this application closes
 	defer l.Close()
 
-	fmt.Println("Listening on " + "localhost:8080")
+	fmt.Println("Listening on localhost:8080")
 	go acceptConn(l, connDone)
 
 	for {
 		select {
-			case conn := <- connDone:
-				if (rand.Intn(2) == 1){
-					readreq(conn, fileName)
-				} else{
-					go readreq(conn, WfileName)
-				}
-			case buffer := <- fileName:
-				fmt.Println("got read Done")
-				if (rand.Intn(2) == 1){
-					findFile(buffer, content)
-				} else {
-					go findFile(buffer, Wcontent)
-				}
-			case sendContent := <- content:
-				if (rand.Intn(2) == 1){
-					send(sendContent)
-				}else {
-					go send(sendContent)
-				}
-			case buffer := <- WfileName:
-				fmt.Println("got read Done")
-				if (rand.Intn(2) == 1){
-					findFile(buffer, content)
-				} else {
-					go findFile(buffer,Wcontent)
-				}
-			case sendContent := <- Wcontent:
-				if (rand.Intn(2) == 1){
-					send(sendContent)
-				}else {
-					go send(sendContent)
-				}
+		case conn := <-connDone:
+			readreq(conn, fileName)
+		case buffer := <-fileName:
+			fmt.Println("got read Done")
+			inMem, err := inMemory(buffer)
+			if err != nil {
+				fmt.Println("Error checking file in memory or not")
+				break
+			}
+			if inMem {
+				fmt.Println("In memory")
+				findFile(buffer, content)
+			} else {
+				fmt.Println("Not in memory")
+				go findFile(buffer, Wcontent)
+			}
+		case sendContent := <-content:
+			send(sendContent)
+		case sendContent := <-Wcontent:
+			go send(sendContent)
 		}
 	}
-
-
-
-
 
 	// Flag gets printed as a page
 	// mux := http.NewServeMux()
@@ -275,14 +271,14 @@ func main() {
 	// os.Exit(2)
 }
 
-func httpEcho(v string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, v)
-	}
-}
+// func httpEcho(v string) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		fmt.Fprintln(w, v)
+// 	}
+// }
 
-func httpHealth() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, `{"status":"ok"}`)
-	}
-}
+// func httpHealth() http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		fmt.Fprintln(w, `{"status":"ok"}`)
+// 	}
+// }
