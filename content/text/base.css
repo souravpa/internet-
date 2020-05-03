@@ -1,0 +1,118 @@
+.header{
+	width: 100%;
+	background-color: deepskyblue;
+	font-family: sans-serif;
+}
+
+#id_name_of_site{
+	font-size: 3em;
+	text-align: left;
+	color: white;
+	padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 10%;
+}
+
+.user-info {
+    text-align: right;
+    font-family: sans-serif; 
+    padding-right: 3%;
+    padding-bottom:5px;
+    font-size: x-large;
+}
+
+input[type="text"], input[type="password"], input[type="email"]{
+ display: block;
+ margin-left:auto;
+ margin-right:auto;
+  width: 100%;
+  height: calc(2.25rem + 2px);
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #495057;
+  background-color: #fff;
+  background-clip: padding-box;
+  border: 1px solid #ced4da;
+  border-radius: 0.25rem;
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out; 
+}
+
+div textarea{
+	margin-left: auto;
+	margin-right: auto;
+	width: 100%;
+	height: 100px;
+}
+
+.content{
+	top: 25%;
+    justify-content: center;
+}
+
+form{
+	margin-left: auto;
+	margin-right: auto;
+	width: 30%;
+}
+
+table{
+	margin-left: auto;
+	margin-right: auto;
+}
+
+#title{
+	text-align: center;
+	font-size: xx-large;
+}
+
+#id_logged_in_user_name{
+    color:white;
+}
+
+#id_dropdown-menu{
+	padding-left: 20px;
+	margin-top: 8px;
+}
+
+#id_post_text{
+	width: 60%;
+}
+
+#id_comment_text_22{
+	width: 50%;
+}
+
+#id_unfollow, #id_follow{
+	margin-left: 3%;
+}
+
+.comment{
+	padding-left: 40px;
+	padding-top: 20px;
+}
+
+.post{
+	padding-bottom: 10px;
+	padding-top: 10px;
+}
+
+input[type="letter"]{
+	width: 100%;
+	height: 100px;
+	padding-left: 3%;
+}
+
+div{
+	margin: 10px;
+}
+
+img{
+	width: 200px;
+	height: 200px;
+	margin-left: auto;
+	margin-right: auto;
+	display: block;
+	text-align: center;
+}
