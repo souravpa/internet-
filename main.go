@@ -10,7 +10,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -33,7 +32,7 @@ type ErrorCode struct {
 	detail string
 }
 type SendJob struct {
-	conn       *net.TCPConn
+	conn       net.Conn
 	content    []byte
 	fileName   string
 	is_dynamic bool
@@ -41,15 +40,15 @@ type SendJob struct {
 }
 
 type ReadDone struct {
-	conn     *net.TCPConn
+	conn     net.Conn
 	fileName string
 	errInfo  ErrorCode
 }
 
 // Accept connections from the client
-func acceptConn(listen *net.TCPListener, connDone chan<- *net.TCPConn) {
+func acceptConn(listen net.Listener, connDone chan<- net.Conn) {
 	for {
-		conn, err := listen.AcceptTCP()
+		conn, err := listen.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection:", err.Error())
 			os.Exit(1)
@@ -59,7 +58,7 @@ func acceptConn(listen *net.TCPListener, connDone chan<- *net.TCPConn) {
 }
 
 // Read requests from the client
-func readreq(conn *net.TCPConn, strRet chan<- ReadDone) {
+func readreq(conn net.Conn, strRet chan<- ReadDone) {
 	var buf = make([]byte, 1024)
 	empty := ErrorCode{conn, "", "", "", ""}
 	for {
@@ -91,6 +90,7 @@ func findFile(job ReadDone, content chan<- SendJob) {
 		return
 	}
 	name := strings.Fields(job.fileName)[1][1:]
+	fmt.Println("in find=" + name)
 	if strings.Count(name, "/") == len(name) {
 		name = "text/home.html"
 	}
@@ -114,24 +114,28 @@ func findFile(job ReadDone, content chan<- SendJob) {
 		}
 		content <- SendJob{job.conn, []byte(cgi), "./" + name, true, empty}
 	} else { // Static content
-		stat, statErr := os.Stat(name)
-		if statErr != nil {
-			e := ErrorCode{job.conn, "403", name, "Forbidden", statErr.Error()}
-			content <- SendJob{job.conn, []byte{}, "", false, e}
-			return
-		}
-		size := stat.Size()
-		if (!stat.Mode().IsRegular()) || (stat.Mode()&syscall.S_IRUSR) == 0 {
-			e := ErrorCode{job.conn, "403", name, "Forbidden", "Server couldn't read the file"}
-			content <- SendJob{job.conn, []byte{}, "", false, e}
-			return
-		}
+		fmt.Println("after it is:" + name)
 		f, openErr := os.Open(name)
 		if openErr != nil {
 			e := ErrorCode{job.conn, "404", name, "Not Found", openErr.Error()}
 			content <- SendJob{job.conn, []byte{}, "", false, e}
 			return
 		}
+		stat, statErr := os.Stat(name)
+		if statErr != nil {
+			e := ErrorCode{job.conn, "403", name, "Forbidden", statErr.Error()}
+			content <- SendJob{job.conn, []byte{}, "", false, e}
+			f.Close()
+			return
+		}
+		size := stat.Size()
+		if (!stat.Mode().IsRegular()) || (stat.Mode()&syscall.S_IRUSR) == 0 {
+			e := ErrorCode{job.conn, "403", name, "Forbidden", "Server couldn't read the file"}
+			content <- SendJob{job.conn, []byte{}, "", false, e}
+			f.Close()
+			return
+		}
+		fmt.Println(stat.Name())
 		data, mmErr := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
 		if mmErr != nil {
 			f.Close()
@@ -169,6 +173,8 @@ func getType(filename string) string {
 		return "video/webm"
 	} else if strings.Contains(filename, ".ogg") {
 		return "video/ogg"
+	} else if strings.Contains(filename, ".pdf") {
+		return "application/pdf"
 	} else {
 		return "application/octet-stream"
 	}
@@ -207,6 +213,7 @@ func send(job SendJob, errorHandling chan<- ErrorCode) {
 		return
 	}
 	name := job.fileName
+	fmt.Println("in send =" + name)
 	if !job.is_dynamic { // Static content
 		date := time.Now().UTC().Format(http.TimeFormat)
 		stat, statErr := os.Stat(name)
@@ -272,10 +279,12 @@ func send(job SendJob, errorHandling chan<- ErrorCode) {
 // Check if a file with the given filename is all in memory and return mapping
 // Return true by default when error occurs
 func inMemory(job ReadDone) (bool, error) {
-	name := "content/" + strings.Fields(job.fileName)[1][1:]
+	name := strings.Fields(job.fileName)[1][1:]
 	if len(name) == 0 {
-		return true, errors.New("empty filename")
+		name = "text/home.html"
 	}
+	name = "content/" + name
+	fmt.Println("in memory=" + name)
 	if strings.Contains(name, "cgi-bin") { // Dynamic content
 		return false, nil
 	}
@@ -321,7 +330,7 @@ func printError(serverError ErrorCode) {
 	var header net.Buffers
 	date := time.Now().UTC().Format(http.TimeFormat)
 	/* Print the HTTP response */
-	res := align("HTTP/1.1 "+serverError.code+" "+serverError.msg, false)
+	res := align("HTTP/1.0 "+serverError.code+" "+serverError.msg, false)
 	header = append(header, res)
 	res = align("Date: "+date, false)
 	header = append(header, res)
@@ -350,14 +359,13 @@ func main() {
 		os.Exit(127)
 	}
 
-	var connDone = make(chan *net.TCPConn, 100)
+	var connDone = make(chan net.Conn, 100)
 	var fileName = make(chan ReadDone, 1)
 	var content = make(chan SendJob, 1)
 	var Wcontent = make(chan SendJob, 100)
 	var errorHandling = make(chan ErrorCode, 100)
 
-	addr, _ := net.ResolveTCPAddr("tcp", "localhost:8080")
-	l, lErr := net.ListenTCP("tcp", addr)
+	l, lErr := net.Listen("tcp", "localhost:8080")
 	if lErr != nil {
 		fmt.Println("Error listening:", lErr.Error())
 		os.Exit(1)
