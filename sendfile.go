@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/funkygao/golib/sendfile"
 	"github.com/tobert/pcstat"
 )
 
@@ -70,9 +71,6 @@ func readreq(conn *net.TCPConn, strRet chan<- ReadDone) {
 			strRet <- ReadDone{conn, string(buf), e}
 			return
 		}
-		// s := string(buf[:len])
-		// fmt.Println("Request:")
-		// fmt.Println(s)
 		break
 	}
 	strRet <- ReadDone{conn, string(buf), empty}
@@ -127,35 +125,7 @@ func findFile(job ReadDone, content chan<- SendJob) {
 		}
 		content <- SendJob{job.conn, []byte(cgi), "./" + name, status, true, empty}
 	} else { // Static content
-		f, openErr := os.Open(name)
-		if openErr != nil {
-			e := ErrorCode{job.conn, "404", name, "Not Found", openErr.Error()}
-			content <- SendJob{job.conn, []byte{}, "", "", false, e}
-			return
-		}
-		stat, statErr := os.Stat(name)
-		if statErr != nil {
-			e := ErrorCode{job.conn, "403", name, "Forbidden", statErr.Error()}
-			content <- SendJob{job.conn, []byte{}, "", "", false, e}
-			f.Close()
-			return
-		}
-		size := stat.Size()
-		if (!stat.Mode().IsRegular()) || (stat.Mode()&syscall.S_IRUSR) == 0 {
-			e := ErrorCode{job.conn, "403", name, "Forbidden", "Server couldn't read the file"}
-			content <- SendJob{job.conn, []byte{}, "", "", false, e}
-			f.Close()
-			return
-		}
-		data, mmErr := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
-		if mmErr != nil {
-			f.Close()
-			e := ErrorCode{job.conn, "500", name, "Internal Server Error", mmErr.Error()}
-			content <- SendJob{job.conn, []byte{}, "", "", false, e}
-			return
-		}
-		f.Close()
-		content <- SendJob{job.conn, data, name, status, false, empty}
+		content <- SendJob{job.conn, []byte{}, name, status, false, empty}
 	}
 }
 
@@ -232,6 +202,11 @@ func send(job SendJob, errorHandling chan<- ErrorCode) {
 			errorHandling <- e
 			return
 		}
+		if (!stat.Mode().IsRegular()) || (stat.Mode()&syscall.S_IRUSR) == 0 {
+			e := ErrorCode{job.conn, "403", name, "Forbidden", "Server couldn't read the file"}
+			errorHandling <- e
+			return
+		}
 		modified := stat.ModTime().Format(http.TimeFormat)
 		size := strconv.FormatInt(stat.Size(), 10)
 		filetype := getType(name)
@@ -254,20 +229,24 @@ func send(job SendJob, errorHandling chan<- ErrorCode) {
 		header = append(header, res)
 		_, whErr := header.WriteTo(job.conn)
 		if whErr != nil {
-			syscall.Munmap(job.content)
 			e := ErrorCode{job.conn, "500", name, "Internal Server Error", whErr.Error()}
 			errorHandling <- e
 			return
 		}
-
-		_, wbErr := job.conn.Write(job.content)
-		if wbErr != nil {
-			syscall.Munmap(job.content)
-			e := ErrorCode{job.conn, "500", name, "Internal Server Error", wbErr.Error()}
+		f, openErr := os.Open(name)
+		if openErr != nil {
+			e := ErrorCode{job.conn, "404", name, "Not Found", openErr.Error()}
 			errorHandling <- e
 			return
 		}
-		syscall.Munmap(job.content)
+		_, mmErr := sendfile.Sendfile(job.conn, f, stat.Size())
+		if mmErr != nil {
+			f.Close()
+			e := ErrorCode{job.conn, "500", name, "Internal Server Error", mmErr.Error()}
+			errorHandling <- e
+			return
+		}
+		f.Close()
 	} else {
 		var header net.Buffers
 		res := align("HTTP/1.1 200 OK", false)
@@ -320,11 +299,9 @@ func inMemory(job ReadDone) (bool, error) {
 	// Only when all pages are in memory will we use the main process to handle it
 	for _, inMem := range res {
 		if !inMem {
-			f.Close()
 			return false, nil
 		}
 	}
-	f.Close()
 	return true, nil
 }
 

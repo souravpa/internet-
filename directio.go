@@ -140,14 +140,14 @@ func findFile(job ReadDone, content chan<- SendJob) {
 			f.Close()
 			return
 		}
-		size := stat.Size()
 		if (!stat.Mode().IsRegular()) || (stat.Mode()&syscall.S_IRUSR) == 0 {
 			e := ErrorCode{job.conn, "403", name, "Forbidden", "Server couldn't read the file"}
 			content <- SendJob{job.conn, []byte{}, "", "", false, e}
 			f.Close()
 			return
 		}
-		data, mmErr := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
+		data := make([]byte, stat.Size())
+		_, mmErr := f.Read(data)
 		if mmErr != nil {
 			f.Close()
 			e := ErrorCode{job.conn, "500", name, "Internal Server Error", mmErr.Error()}
@@ -254,20 +254,16 @@ func send(job SendJob, errorHandling chan<- ErrorCode) {
 		header = append(header, res)
 		_, whErr := header.WriteTo(job.conn)
 		if whErr != nil {
-			syscall.Munmap(job.content)
 			e := ErrorCode{job.conn, "500", name, "Internal Server Error", whErr.Error()}
 			errorHandling <- e
 			return
 		}
-
 		_, wbErr := job.conn.Write(job.content)
 		if wbErr != nil {
-			syscall.Munmap(job.content)
 			e := ErrorCode{job.conn, "500", name, "Internal Server Error", wbErr.Error()}
 			errorHandling <- e
 			return
 		}
-		syscall.Munmap(job.content)
 	} else {
 		var header net.Buffers
 		res := align("HTTP/1.1 200 OK", false)
@@ -320,11 +316,9 @@ func inMemory(job ReadDone) (bool, error) {
 	// Only when all pages are in memory will we use the main process to handle it
 	for _, inMem := range res {
 		if !inMem {
-			f.Close()
 			return false, nil
 		}
 	}
-	f.Close()
 	return true, nil
 }
 
@@ -379,7 +373,7 @@ func main() {
 	var connDone = make(chan *net.TCPConn, 100)
 	var fileName = make(chan ReadDone, 100)
 	var content = make(chan SendJob, 100)
-	// var Wcontent = make(chan SendJob, 100)
+	var Wcontent = make(chan SendJob, 100)
 	var errorHandling = make(chan ErrorCode, 100)
 
 	addr, aErr := net.ResolveTCPAddr("tcp", "localhost:8080")
@@ -412,8 +406,8 @@ func main() {
 			}
 		case sendContent := <-content:
 			send(sendContent, errorHandling)
-		// case sendContent := <-Wcontent:
-		// 	go send(sendContent, errorHandling)
+		case sendContent := <-Wcontent:
+			go send(sendContent, errorHandling)
 		case serverError := <-errorHandling:
 			printError(serverError)
 		}
